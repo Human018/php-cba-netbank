@@ -159,7 +159,10 @@ class API
         $transactionList = [];
         if (!empty($transactions->Transactions)) {
             foreach ($transactions->Transactions as $transaction) {
-                $date = \DateTime::createFromFormat('YmdHisu', substr($transaction->Date->Sort[1], 0, 20), new \DateTimeZone('UTC'));
+                if (intval($transaction->Date->Sort[1]) > 200000)
+                    $date = \DateTime::createFromFormat('YmdHisu', substr($transaction->Date->Sort[1], 0, 20), new \DateTimeZone('UTC'));
+                else
+                    $date = new \DateTime($transaction->Date->Text);
                 $date->setTimeZone(new \DateTimeZone($this->timezone));
                 $transactionList[] = [
                     'timestamp' => $transaction->Date->Sort[1],
