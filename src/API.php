@@ -172,11 +172,44 @@ class API
                     'balance' => $this->processCurrency($transaction->Balance->Text),
                     'trancode' => $transaction->TranCode->Text,
                     'receiptnumber' => $transaction->ReceiptNumber->Text,
+                    'url' => $transaction->Description->Url,
                 ];
             }
         }
 
         return $transactionList;
+    }
+
+    public function getTransactionDetails($url)
+    {
+        $link = sprintf("%s%s", self::BASE_URL, substr($url, 1));
+        
+        // Server updates '_CBAPVCOOKIE' cookie, but this throws a security error on all subsequent requests.
+        $cookieJar = $this->client->getCookieJar();
+        $orig = $cookieJar->get('_CBAPVCOOKIE');
+        $result = $this->client->request('POST', $link, [], [], [], null, false);
+        $cookieJar->set($orig);
+        
+        $crawler = new \Symfony\Component\DomCrawler\Crawler($result->text());
+        
+        $crawler = $crawler->filterXPath("//table/*/tr");
+        
+        $nodeValues = $crawler->each(
+                function (Crawler $node, $i) {
+                        $first = trim($node->children()->first()->text());
+                        $last = trim($node->children()->last()->text());
+                        if (strpos($first, "\n") !== false)
+                            return;
+                        else
+                            return array($first => $last);
+                }
+        );
+        $values = array();
+        foreach ($nodeValues as $node) {
+            if (is_array($node))
+                $values = array_merge($values, $node);
+        }
+        return $values;
     }
 
     public function setTimezone($timezone)
