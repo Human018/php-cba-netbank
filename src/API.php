@@ -56,7 +56,7 @@ class API
         $crawler = $this->client->submit($form);
 
         $accountList = [];
-        
+
         $crawler->filter('.main_group_account_row')->each(function ($account) use (&$accountList) {
             $name = $account;
             $name = $name->filter('.NicknameField a')->first();
@@ -146,11 +146,10 @@ class API
         /x
         ';
 
-        $extracted = preg_match_all($pattern, $html, $matches);
+        preg_match_all('/({"Transactions":(?:.+)})\);/', $html, $matches);
 
-        $transactions = [];
-        foreach ($matches[0] as $_temp) {
-            if (strstr($_temp, '{"Transactions"')) {
+        foreach ($matches[1] as $_temp) {
+            if (strstr($_temp, 'Transactions')) {
                 $transactions = json_decode($_temp);
                 break;
             }
