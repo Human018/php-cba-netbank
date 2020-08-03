@@ -2,10 +2,27 @@
 
 namespace Kravock\Netbank;
 
-use Goutte\Client;
+use Goutte\Client as GoutteClient;
 use GuzzleHttp\Client as GuzzleClient;
 use Symfony\Component\DomCrawler\Crawler;
 use Symfony\Component\DomCrawler\Field\InputFormField;
+
+// Extend Goutte\Client to expose the Guzzle response
+// Needed so that we can grab the JSON response for the accounts list
+class Client extends GoutteClient
+{
+    private $guzzleResponse;
+
+    public function getGuzzleResponse() {
+        return $this->guzzleResponse;
+    }
+
+    protected function createResponse($response)
+    {
+        $this->guzzleResponse = $response;
+        return parent::createResponse($response);
+    }
+}
 
 class API
 {
@@ -17,6 +34,8 @@ class API
 
     const BASE_URL = 'https://www.my.commbank.com.au/';
     const LOGIN_URL = 'netbank/Logon/Logon.aspx';
+    const API_BASE = 'https://www.commbank.com.au/retail/netbank/api/';
+    const ACCOUNTS_URL = 'home/v1/accounts';
 
     /**
      * Create a new API Instance
@@ -36,10 +55,8 @@ class API
         $this->client->setClient($this->guzzleClient);
     }
 
-    public function login($username, $password)
+    private function _doLogin($crawler)
     {
-        $crawler = $this->client->request('GET', sprintf("%s%s", self::BASE_URL, self::LOGIN_URL));
-
         $form = $crawler->selectButton('Log on')->form();
 
         $fields = $crawler->filter('input');
@@ -49,42 +66,49 @@ class API
             $field->removeAttribute('disabled');
         }
 
-        $form['txtMyClientNumber$field'] = $username;
-        $form['txtMyPassword$field'] = $password;
+        $form['txtMyClientNumber$field'] = $this->username;
+        $form['txtMyPassword$field'] = $this->password;
         $form['JS'] = 'E';
 
         $crawler = $this->client->submit($form);
+        return $crawler;
+    }
+
+    public function login($username, $password)
+    {
+        $this->username = $username;
+        $this->password = $password;
+
+        $crawler = $this->client->request('GET', sprintf("%s%s", self::BASE_URL, self::LOGIN_URL));
+
+        if (preg_match('#<h2>Log on to NetBank</h2>#', $crawler->html())) {
+            $crawler = $this->_doLogin($crawler);
+        }
+
+        if (preg_match('#<button>Click to continue</button>#', $crawler->html())) {
+            $form = $crawler->selectButton('Click to continue')->form();
+            $crawler = $this->client->submit($form);
+        }
+
+        $client = $this->client->request('GET', sprintf("%s%s?t=%s", self::API_BASE, self::ACCOUNTS_URL, time()));
+        $accounts = json_decode($this->client->getGuzzleResponse()->getBody(), true);
 
         $accountList = [];
 
-        $crawler->filter('.main_group_account_row')->each(function ($account) use (&$accountList) {
-            $name = $account;
-            $name = $name->filter('.NicknameField a')->first();
-
-            $bsb = $account;
-            $bsb = $bsb->filter('.BSBField .field')->first();
-
-            $accountNumber = $account;
-            $accountNumber = $accountNumber->filter('.AccountNumberField .field')->first();
-
-            $balance = $account;
-            $balance = $balance->filter('td.AccountBalanceField span.Currency')->first();
-
-            $available = $account;
-            $available = $available->filter('td.AvailableFundsField span.Currency')->first();
-
-            $bal = $balance->count() ? $balance->text() : 0;
-            $avl = $available->count() ? $available->text() : 0;
-
-            $accountList[] = [
-                'nickname' => $name->text(),
-                'url' => $name->attr('href'),
-                'bsb' => $bsb->count() ? $bsb->text() : '',
-                'accountNum' => $accountNumber->count() ? $accountNumber->text() : '',
-                'balance' => $this->processCurrency($bal),
-                'available' => $this->processCurrency($avl)
+        foreach ($accounts['accounts'] as $account) {
+            // Margin Loan accounts don't have a link, and Share Portfolios don't have available funds.  Just ignore them.
+            if (!isset($account['link']) || !isset($account['availableFunds'][0]))
+                continue;
+            
+            $accountList[$account['number']] = [
+                'nickname'   => $account['displayName'],
+                'url'        => $account['link']['url'],
+                'bsb'        => '', // Unable to find BSB in the returned JSON.  Retain for backwards compatibility
+                'accountNum' => $account['number'],
+                'balance'    => $account['balance'][0]['amount'],
+                'available'  => $account['availableFunds'][0]['amount']
             ];
-        });
+        }
 
         if (!$accountList) {
             throw new \Exception('Unable to retrieve account list.');
@@ -95,8 +119,15 @@ class API
 
     public function getTransactions($account, $from, $to)
     {
-        $link = sprintf("%s%s", self::BASE_URL, $account['url']);
-        $crawler = $this->client->request('GET', $link);
+        $crawler = $this->client->request('GET', $account['url']);
+        if (preg_match('#<h2>Log on to NetBank</h2>#', $crawler->html())) {
+            $crawler = $this->_doLogin($crawler);
+        }
+
+        if (preg_match('#<button>Click to continue</button>#', $crawler->html())) {
+            $form = $crawler->selectButton('Click to continue')->form();
+            $crawler = $this->client->submit($form);
+        }
 
         $form = $crawler->filter('#aspnetForm');
 
