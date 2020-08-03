@@ -134,20 +134,9 @@ class API
         $crawler = $this->client->submit($form);
         $html = $crawler->html();
 
-        $pattern = '
-        /
-        \{              # { character
-            (?:         # non-capturing group
-                [^{}]   # anything that is not a { or }
-                |       # OR
-                (?R)    # recurses the entire pattern
-            )*          # previous group zero or more times
-        \}              # } character
-        /x
-        ';
-
         preg_match_all('/({"Transactions":(?:.+)})\);/', $html, $matches);
 
+        $transactions = [];
         foreach ($matches[1] as $_temp) {
             if (strstr($_temp, 'Transactions')) {
                 $transactions = json_decode($_temp);
