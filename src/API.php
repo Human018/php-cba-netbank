@@ -35,6 +35,7 @@ class API
     const BASE_URL = 'https://www.my.commbank.com.au/';
     const LOGIN_URL = 'netbank/Logon/Logon.aspx';
     const API_BASE = 'https://www.commbank.com.au/retail/netbank/api/';
+    const TRANSACTION_API = 'https://www.commbank.com.au/retail/netbank/accounts/api/transactions';
     const ACCOUNTS_URL = 'home/v1/accounts';
 
     /**
@@ -199,35 +200,20 @@ class API
         return $transactionList;
     }
 
-    public function getTransactionDetails($url)
+    public function getTransactionDetails($account)
     {
-        $link = sprintf("%s%s", self::BASE_URL, substr($url, 1));
+        $link = self::TRANSACTION_API . '?account=' . $account;
         
         // Server updates '_CBAPVCOOKIE' cookie, but this throws a security error on all subsequent requests.
         $cookieJar = $this->client->getCookieJar();
         $orig = $cookieJar->get('_CBAPVCOOKIE');
-        $result = $this->client->request('POST', $link, [], [], [], null, false);
+        $result = $this->client->request('GET', $link, [], [], [], null, false);
         $cookieJar->set($orig);
+
+        $content = $this->client->getResponse()->getContent();
+        $json = json_decode($content);
+        return $json->transactions;
         
-        $crawler = new \Symfony\Component\DomCrawler\Crawler($result->text());
-        
-        $crawler = $crawler->filterXPath("//table/*/tr");
-        
-        $nodeValues = $crawler->each(
-                function (Crawler $node, $i) {
-                        $first = trim($node->children()->first()->text());
-                        $last = trim($node->children()->last()->text());
-                        if (strpos($first, "\n") !== false)
-                            return;
-                        else
-                            return array($first => $last);
-                }
-        );
-        $values = array();
-        foreach ($nodeValues as $node) {
-            if (is_array($node))
-                $values = array_merge($values, $node);
-        }
         return $values;
     }
 
